@@ -5,8 +5,9 @@ from pathlib import Path
 
 
 def project_root() -> Path:
-    """Return the project root directory (where this file's ancestor is the repo root)."""
-    return Path(__file__).resolve().parents[3]
+    """Return the project root directory (repository root)."""
+    # This file: <repo>/supy/utils/paths.py → parents[2] is <repo>
+    return Path(__file__).resolve().parents[2]
 
 
 def screenshots_dir() -> Path:

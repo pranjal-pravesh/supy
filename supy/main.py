@@ -6,6 +6,7 @@ from typing import Optional, Tuple
 from pynput import mouse
 
 from .capture import capture_fullscreen_to_file, capture_region_to_file
+from .ocr import run_ocr_to_text
 from .hotkey import GlobalHotkeyListener
 
 
@@ -18,6 +19,11 @@ def _on_hotkey() -> None:
     print("[supy] Hotkey detected: capturing full screen…")
     path = capture_fullscreen_to_file()
     print(f"[supy] Saved screenshot to: {path}")
+    try:
+        txt = run_ocr_to_text(path)
+        print(f"[supy] OCR saved to: {txt}")
+    except Exception as e:
+        print(f"[supy] OCR failed: {e}")
 
 
 def _on_hotkey_cropped() -> None:
@@ -49,6 +55,11 @@ def _on_hotkey_cropped() -> None:
     print(f"[supy] Cropped step 2 at ({x2},{y2}). Capturing region (left={left}, top={top}, width={width}, height={height})…")
     path = capture_region_to_file(left, top, width, height)
     print(f"[supy] Saved cropped screenshot to: {path}")
+    try:
+        txt = run_ocr_to_text(path)
+        print(f"[supy] OCR saved to: {txt}")
+    except Exception as e:
+        print(f"[supy] OCR failed: {e}")
     _pending_crop_start = None
     _pending_crop_ts = 0.0
 

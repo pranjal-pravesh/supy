@@ -14,8 +14,9 @@ class GlobalHotkeyListener:
     Works on macOS and Windows (Option on mac maps to Alt in pynput).
     """
 
-    def __init__(self, on_trigger: Callable[[], None], debounce_seconds: float = 0.8) -> None:
+    def __init__(self, on_trigger: Callable[[], None], debounce_seconds: float = 0.8, on_trigger_cropped: Callable[[], None] | None = None) -> None:
         self.on_trigger = on_trigger
+        self.on_trigger_cropped = on_trigger_cropped
         self.debounce_seconds = debounce_seconds
         self._last_trigger_ts: float = 0.0
         self._lock = threading.Lock()
@@ -25,11 +26,14 @@ class GlobalHotkeyListener:
         self._alt_down: bool = False
         self._shift_down: bool = False
         self._q_down: bool = False
-        # Virtual key codes for 'Q' on macOS and Windows
+        self._w_down: bool = False
+        # Virtual key codes for 'Q' and 'W' on macOS and Windows
         self._q_vk_codes = {12, 81}
+        self._w_vk_codes = {13, 87}
 
     def _check_combo(self) -> bool:
-        return self._alt_down and self._shift_down and self._q_down
+        # Trigger when Alt/Option + Shift is held with either Q or W
+        return self._alt_down and self._shift_down and (self._q_down or self._w_down)
 
     def _maybe_trigger(self) -> None:
         now = time.monotonic()
@@ -37,7 +41,10 @@ class GlobalHotkeyListener:
             return
         self._last_trigger_ts = now
         try:
-            self.on_trigger()
+            if self._q_down and self.on_trigger is not None:
+                self.on_trigger()
+            elif self._w_down and self.on_trigger_cropped is not None:
+                self.on_trigger_cropped()
         except Exception:
             # Silent by design; avoid UI/log spam. Consider adding file logging later.
             pass
@@ -57,6 +64,8 @@ class GlobalHotkeyListener:
                 vk = getattr(key, 'vk', None)
                 if vk in self._q_vk_codes:
                     self._q_down = True
+                if vk in self._w_vk_codes:
+                    self._w_down = True
             if self._check_combo():
                 self._maybe_trigger()
 
@@ -75,6 +84,8 @@ class GlobalHotkeyListener:
                 vk = getattr(key, 'vk', None)
                 if vk in self._q_vk_codes:
                     self._q_down = False
+                if vk in self._w_vk_codes:
+                    self._w_down = False
 
     def start(self) -> None:
         # Single listener tracks modifier and physical Q by virtual-key code

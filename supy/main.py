@@ -3,16 +3,31 @@ from __future__ import annotations
 import sys
 import time
 from typing import Optional, Tuple
+import threading
 from pynput import mouse
 
 from .capture import capture_fullscreen_to_file, capture_region_to_file
 from .ocr import run_ocr_to_text
 from .hotkey import GlobalHotkeyListener
+from .signal import StatusDot
 
 
 _pending_crop_start: Optional[Tuple[int, int]] = None
 _pending_crop_ts: float = 0.0
 _pending_timeout_seconds: float = 12.0
+_status_dot: Optional[StatusDot] = None
+
+
+def _set_done_then_idle(delay_seconds: float = 3.0) -> None:
+    if _status_dot is None:
+        return
+    _status_dot.set_done()
+    def _reset() -> None:
+        if _status_dot is not None:
+            _status_dot.set_idle()
+    t = threading.Timer(delay_seconds, _reset)
+    t.daemon = True
+    t.start()
 
 
 def _on_hotkey() -> None:
@@ -24,6 +39,8 @@ def _on_hotkey() -> None:
         print(f"[supy] OCR saved to: {txt}")
     except Exception as e:
         print(f"[supy] OCR failed: {e}")
+    else:
+        _set_done_then_idle()
 
 
 def _on_hotkey_cropped() -> None:
@@ -41,6 +58,8 @@ def _on_hotkey_cropped() -> None:
         _pending_crop_start = (int(x), int(y))
         _pending_crop_ts = now
         print(f"[supy] Cropped step 1 set at ({_pending_crop_start[0]},{_pending_crop_start[1]}). Press Option+Shift+W again for bottom-right.")
+        if _status_dot is not None:
+            _status_dot.set_pending_crop()
         return
 
     x1, y1 = _pending_crop_start
@@ -62,6 +81,7 @@ def _on_hotkey_cropped() -> None:
         print(f"[supy] OCR failed: {e}")
     _pending_crop_start = None
     _pending_crop_ts = 0.0
+    _set_done_then_idle()
 
 
 def run() -> None:
@@ -70,9 +90,18 @@ def run() -> None:
         print("[supy] macOS: If hotkey doesn't trigger, grant Accessibility to your terminal app.")
         print("[supy] macOS: If capture fails, grant Screen Recording permission as well.")
     print("[supy] Cropped capture: Alt/Option + Shift + W (two-press: set top-left, then bottom-right)")
+    global _status_dot
+    _status_dot = StatusDot()
     listener = GlobalHotkeyListener(on_trigger=_on_hotkey, debounce_seconds=0.8, on_trigger_cropped=_on_hotkey_cropped)
     listener.start()
-    listener.join()
+    if sys.platform == 'darwin':
+        # Tk must run on the main thread on macOS
+        _status_dot.set_idle()
+        _status_dot.run_on_current_thread()
+    else:
+        _status_dot.start()
+        _status_dot.set_idle()
+        listener.join()
 
 
 if __name__ == "__main__":

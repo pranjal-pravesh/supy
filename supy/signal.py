@@ -31,6 +31,14 @@ class StatusDot:
         self._thread: Optional[threading.Thread] = None
         self._cmd_q: "queue.Queue[tuple[str, Optional[str]]]" = queue.Queue()
         self._alive = threading.Event()
+        # Label shown to the LEFT of the dot in the tray icon/overlay
+        self._label_text: str = ""
+        # Style controls (user-tunable)
+        self.font_family: str = "SF Pro Text"
+        self.font_size: int = 16
+        self.text_color: str = "#ffffff"
+        self.opacity: float = 1.0  # 0.0..1.0
+        self.max_label_chars: int = 24
 
     def set_idle(self) -> None:
         self._set_color(self.COLORS["idle"])
@@ -44,6 +52,17 @@ class StatusDot:
     def _set_color(self, color: str) -> None:
         if self._alive.is_set():
             self._cmd_q.put(("color", color))
+
+    def set_label(self, text: str) -> None:
+        """Set the short label to render left of the dot."""
+        if text is None:
+            text = ""
+        if self._alive.is_set():
+            self._cmd_q.put(("label", text))
+
+    def clear_label(self) -> None:
+        if self._alive.is_set():
+            self._cmd_q.put(("label", ""))
 
     def stop(self) -> None:
         if self._alive.is_set():
@@ -78,7 +97,7 @@ class StatusDot:
         else:
             self._run_ui_tk()
 
-    def _process_commands_generic(self, update_color_fn, quit_fn):
+    def _process_commands_generic(self, update_color_fn, quit_fn, update_label_fn=None):
         """Generic command processor for all UI backends"""
         processed = 0
         while processed < 8:
@@ -88,6 +107,10 @@ class StatusDot:
                 break
             if cmd == "color" and isinstance(arg, str):
                 update_color_fn(arg)
+            elif cmd == "label" and isinstance(arg, str):
+                self._label_text = arg[: self.max_label_chars]
+                if update_label_fn is not None:
+                    update_label_fn(self._label_text)
             elif cmd == "quit":
                 quit_fn()
                 return
@@ -96,7 +119,7 @@ class StatusDot:
     # ---------------- macOS Menu Bar ----------------
     def _run_ui_menubar_macos(self) -> None:
         from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
-        from PyQt6.QtGui import QIcon, QPixmap, QPainter, QBrush, QColor
+        from PyQt6.QtGui import QIcon, QPixmap, QPainter, QBrush, QColor, QFont
         from PyQt6.QtCore import Qt, QTimer
 
         app = QApplication.instance() or QApplication([])
@@ -106,26 +129,46 @@ class StatusDot:
             self._run_ui_console()
             return
 
-        def create_circle_icon(color_hex: str) -> QIcon:
-            size = 22
-            pixmap = QPixmap(size, size)
+        def create_icon(color_hex: str, label_text: str) -> QIcon:
+            # Compose an icon with label on the left and a dot on the right
+            h = 22
+            # Estimate width: char width ~ font_size * 0.6
+            est_char_w = max(6, int(self.font_size * 0.6))
+            label = (label_text or "")[: self.max_label_chars]
+            text_w = est_char_w * len(label) + 6
+            dot_w = 22
+            total_w = min(256, max(dot_w, text_w + dot_w))
+
+            pixmap = QPixmap(total_w, h)
             pixmap.fill(Qt.GlobalColor.transparent)
-            
+
             painter = QPainter(pixmap)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            
+            painter.setOpacity(max(0.0, min(1.0, self.opacity)))
+
+            # Draw label text
+            if label:
+                font = QFont(self.font_family, self.font_size)
+                painter.setFont(font)
+                # Text color
+                hex_tc = self.text_color.lstrip('#')
+                tr, tg, tb = int(hex_tc[0:2], 16), int(hex_tc[2:4], 16), int(hex_tc[4:6], 16)
+                painter.setPen(QColor(tr, tg, tb))
+                painter.drawText(2, h - 7, label)
+
+            # Draw dot
             hex_color = color_hex.lstrip('#')
             r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
-            
             painter.setBrush(QBrush(QColor(r, g, b)))
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawEllipse(3, 3, size-6, size-6)
+            # Place dot at right side
+            painter.drawEllipse(total_w - 19, 3, 16, 16)
             painter.end()
-            
+
             return QIcon(pixmap)
 
         status_item = QSystemTrayIcon()
-        status_item.setIcon(create_circle_icon(self.COLORS["idle"]))
+        status_item.setIcon(create_icon(self.COLORS["idle"], self._label_text))
         status_item.setToolTip("Supy Screenshot Tool")
         
         # Context menu
@@ -145,8 +188,9 @@ class StatusDot:
         # Command processing timer
         timer = QTimer()
         timer.timeout.connect(lambda: self._process_commands_generic(
-            lambda color: status_item.setIcon(create_circle_icon(color)),
-            lambda: (status_item.hide(), app.quit())
+            lambda color: status_item.setIcon(create_icon(color, self._label_text)),
+            lambda: (status_item.hide(), app.quit()),
+            update_label_fn=lambda _lbl: status_item.setIcon(create_icon(self.COLORS["idle"], self._label_text))
         ))
         timer.start(100)
 
@@ -181,6 +225,7 @@ class StatusDot:
     # ---------------- Tk (Windows/Linux) ----------------
     def _run_ui_tk(self) -> None:
         import tkinter as tk
+        import tkinter.font as tkfont
 
         root = tk.Tk()
         root.overrideredirect(True)
@@ -191,13 +236,25 @@ class StatusDot:
         screen_h = root.winfo_screenheight()
         x = screen_w - self._diameter - self._margin
         y = screen_h - self._diameter - self._margin - 60  # Above dock/taskbar
-        root.geometry(f"{self._diameter}x{self._diameter}+{x}+{y}")
+        # Width depends on label length
+        est_char_w = max(6, int(self.font_size * 0.6))
+        label = (self._label_text or "")[: self.max_label_chars]
+        text_w = est_char_w * len(label) + 6
+        width = max(self._diameter, min(260, text_w + self._diameter + 8))
+        root.geometry(f"{width}x{self._diameter}+{x}+{y}")
 
-        canvas = tk.Canvas(root, width=self._diameter, height=self._diameter, 
+        canvas = tk.Canvas(root, width=width, height=self._diameter, 
                           highlightthickness=0, bd=0, bg="#000000")
         canvas.pack(fill=tk.BOTH, expand=True)
         circle = canvas.create_oval(1, 1, self._diameter-1, self._diameter-1, 
                                    fill=self.COLORS["idle"], outline="")
+        # Text item
+        try:
+            fnt = tkfont.Font(family=self.font_family, size=self.font_size)
+        except Exception:
+            fnt = tkfont.Font(size=self.font_size)
+        text_item = canvas.create_text(4, self._diameter//2, anchor='w', fill=self.text_color,
+                                       font=fnt, text=label)
 
         # Windows-specific topmost enforcement
         if sys.platform == 'win32':
@@ -210,10 +267,11 @@ class StatusDot:
 
         # Command processing
         def process_queue():
-            self._process_commands_generic(
-                lambda color: canvas.itemconfig(circle, fill=color),
-                lambda: root.destroy()
-            )
+            def update_color(color):
+                canvas.itemconfig(circle, fill=color)
+            def update_label(new_label):
+                canvas.itemconfig(text_item, text=new_label)
+            self._process_commands_generic(update_color, lambda: root.destroy(), update_label_fn=update_label)
             try:
                 root.after(100, process_queue)
             except tk.TclError:

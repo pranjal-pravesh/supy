@@ -8,6 +8,7 @@ from pynput import mouse
 
 from .capture import capture_fullscreen_to_file, capture_region_to_file
 from .ocr import run_ocr_to_text
+from .ai_analysis import analyze_text_with_ai
 from .hotkey import GlobalHotkeyListener
 from .signal import StatusDot
 
@@ -37,8 +38,12 @@ def _on_hotkey() -> None:
     try:
         txt = run_ocr_to_text(path)
         print(f"[supy] OCR saved to: {txt}")
+        
+        # Send OCR text to AI for analysis
+        response = analyze_text_with_ai(txt)
+        print(f"[supy] AI analysis saved to: {response}")
     except Exception as e:
-        print(f"[supy] OCR failed: {e}")
+        print(f"[supy] OCR/AI analysis failed: {e}")
     else:
         _set_done_then_idle()
 
@@ -77,8 +82,13 @@ def _on_hotkey_cropped() -> None:
     try:
         txt = run_ocr_to_text(path)
         print(f"[supy] OCR saved to: {txt}")
+        
+        # Send OCR text to AI for analysis
+        response = analyze_text_with_ai(txt)
+        print(f"[supy] AI analysis saved to: {response}")
     except Exception as e:
-        print(f"[supy] OCR failed: {e}")
+        print(f"[supy] OCR/AI analysis failed: {e}")
+    
     _pending_crop_start = None
     _pending_crop_ts = 0.0
     _set_done_then_idle()

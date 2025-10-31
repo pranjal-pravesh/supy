@@ -5,6 +5,10 @@ python-doctr[torch]>=0.8.0
 torch>=2.0.0
 PyQt6>=6.4.0
 pyobjc-framework-Cocoa>=10.0; platform_system == "Darwin"
+langchain>=0.1.0
+langchain-openai>=0.1.0
+openai>=1.0.0
+python-dotenv>=1.0.0
 
 
 

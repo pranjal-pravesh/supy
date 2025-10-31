@@ -22,6 +22,10 @@ _status_dot: Optional[StatusDot] = None
 # Toggle between local OCR + text analysis vs direct image analysis
 USE_MULTIMODAL_GPT5 = True  # Set to False to use local OCR instead
 
+# Answer display state
+_current_answer: Optional[str] = None
+_answer_visible: bool = False
+
 
 def _set_done_then_idle(delay_seconds: float = 3.0) -> None:
     if _status_dot is None:
@@ -125,15 +129,45 @@ def _extract_answer_tag(text: str) -> Optional[str]:
 
 
 def _maybe_show_answer_label(response_path) -> None:
+    """Parse and store the answer, but don't show it yet."""
+    global _current_answer
     try:
         from pathlib import Path
         rp = Path(response_path)
         body = rp.read_text(encoding='utf-8')
     except Exception:
         return
+    
     ans = _extract_answer_tag(body)
-    if ans and _status_dot is not None:
-        _status_dot.set_label(ans)
+    if ans:
+        _current_answer = ans
+        print(f"[supy] Answer parsed and stored (hidden): {ans}")
+        # Don't show it yet - wait for Option+Space toggle
+    else:
+        _current_answer = None
+
+
+def _toggle_answer_visibility() -> None:
+    """Toggle the visibility of the current answer in the menu bar."""
+    global _answer_visible
+    print("[supy] *** TOGGLE ANSWER CALLED ***")  # Debug
+    
+    if _status_dot is None:
+        print("[supy] No status dot available")
+        return
+    
+    if _current_answer is None:
+        print("[supy] No answer available to show")
+        return
+    
+    _answer_visible = not _answer_visible
+    
+    if _answer_visible:
+        _status_dot.set_label(_current_answer)
+        print(f"[supy] Answer shown: {_current_answer}")
+    else:
+        _status_dot.clear_label()
+        print("[supy] Answer hidden")
 
 
 def run() -> None:
@@ -142,9 +176,15 @@ def run() -> None:
         print("[supy] macOS: If hotkey doesn't trigger, grant Accessibility to your terminal app.")
         print("[supy] macOS: If capture fails, grant Screen Recording permission as well.")
     print("[supy] Cropped capture: Alt/Option + Shift + W (two-press: set top-left, then bottom-right)")
+    print("[supy] Toggle answer: Alt/Option + Space")
     global _status_dot
     _status_dot = StatusDot()
-    listener = GlobalHotkeyListener(on_trigger=_on_hotkey, debounce_seconds=0.8, on_trigger_cropped=_on_hotkey_cropped)
+    listener = GlobalHotkeyListener(
+        on_trigger=_on_hotkey, 
+        debounce_seconds=0.8, 
+        on_trigger_cropped=_on_hotkey_cropped,
+        on_toggle_answer=_toggle_answer_visibility
+    )
     listener.start()
     if sys.platform == 'darwin':
         # Tk must run on the main thread on macOS
